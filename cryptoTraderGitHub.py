@@ -745,7 +745,6 @@ def main(argv):
 
     #r = requests.post(api_url + '/orders', json=order, auth=auth)
     #print r.json()
-    # {"id": "0428b97b-bec1-429e-a94c-59992926778d"}
    
     #r = requests.get(order_url, auth=auth)
     #print r.json()["status"]
