@@ -1,7 +1,7 @@
 # Misc
 Version Tracking for miscellaneous files that don't warrant their own repo.
 
-Please note that these are my own personal projects and code snippets made public in the hope they may be found useful and/or education.  
+Please note that these are my own personal projects and code snippets made public in the hope they may be found useful and/or educational.  
 
 That said, I will not be held responsible for any lose sustained due to the code herein, esp. the cryptoTrader.  The logic was never completed is not suitable for real trading.  You may find the logic and functions helpful for interfacing with the gdax/coinbase website, but the logic of trading MUST be redesigned. The statement below applies to all the code in this repo.
 
