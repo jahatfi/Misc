@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import copy
 import os
 import pprint
 import sys
@@ -12,7 +13,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import logging
-logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
 logger = logging.getLogger()
 
 rows, columns = os.popen('stty size', 'r').read().split()
@@ -54,7 +55,7 @@ c_keywords = [
 ]
 
 # A list of c primitive types
-c_primitives = set([
+original_c_primitives = set([
     "int",
     "float",
     "double",
@@ -86,13 +87,13 @@ include_directories = []
 
 def analyzeFile(filename: str):
     
-    global files_processed_int
-    global results
-    global files_succeeded
-    global c_primitives
-    global max_args
+    results = defaultdict(int)
+    #files_succeeded
+    c_primitives = copy.deepcopy(original_c_primitives)
+    max_args = 0
     these_results = []
-
+    prev_line = ""
+    all_lines = []
 
     print(" " * columns, end='\r')
     #print(f"\rAnalyzing {filename}", end="\n")
@@ -119,6 +120,7 @@ def analyzeFile(filename: str):
         for line in file_contents:
             line = comment_remover(line)
             line = line.strip()
+
             if append_line:
                 line = prepend + line
             if line.endswith(','):
@@ -127,6 +129,7 @@ def analyzeFile(filename: str):
                 continue
             else:
                 append_line = False
+            all_lines.append(line)
 
             if line.startswith("typedef") and line.endswith(";"):
                 new_type = line.split()[-1].strip(';')
@@ -135,7 +138,7 @@ def analyzeFile(filename: str):
                 continue         
             if re.match("}\s*\w+\s*;", line):
                 new_type = line.lstrip('}').strip(';').strip()
-                #print(f"Adding struct {new_type}")
+                logger.debug(f"Adding struct {new_type}")
                 c_primitives.add(new_type)
             if '(' not in line:
                 continue
@@ -178,9 +181,17 @@ def analyzeFile(filename: str):
                 continue
 
             args = [arg.strip() for arg in args.split(",")]
-            return_type = line.split(function_name)[0].strip()
-            return_type = [x for x in return_type.split() if x != "__extern__" and not x.startswith("__")]
-            return_type = " ".join(return_type)
+            #return_type = line.split(function_name)[0].strip()
+            
+            return_type = re.split(f"{function_name.strip('*')}\s*\(", line)[0].strip()
+            return_type = [x for x in return_type.split() if x in c_primitives or ( x != "__extern__" and not x.startswith("__") and x != "extern")]
+            return_type = " ".join(return_type).strip()
+            if not return_type:
+                logger.info(f"No type for {function_name}")
+                return_type = re.split(f"{function_name.strip('*')}\s*\(", all_lines[-2])[0].strip()
+                logger.info(f"No type for {function_name} #2: {return_type}: {all_lines[-1]}")
+                return_type = [x for x in return_type.split() if x in c_primitives or ( x != "__extern__" and not x.startswith("__") and x != "extern")]
+                return_type = " ".join(return_type).strip()
             logger.debug(f"Args: {args}")
             logger.info("-"*80)
             logger.info(f"From function {function_name}{*args,}")
@@ -188,7 +199,7 @@ def analyzeFile(filename: str):
             logger.info(f"Return type: {return_type}")
             this_row = {}
             this_row["function_name"] = function_name
-            this_row["return_type"] = return_type
+            this_row["return_type"] = return_type.lstrip("extern ")
             this_row["is_variadic"] = "False"
             for arg_index, arg in enumerate(args):
                 if arg_index > max_args:
@@ -274,8 +285,8 @@ def analyzeFile(filename: str):
             logger.info("Done with row")
             pprint.pprint(this_row)
             these_results.append(this_row)
-        files_succeeded += 1
-    return these_results
+        #files_succeeded += 1
+    return these_results, max_args
 
 def comment_remover(text):
     def replacer(match):
@@ -324,7 +335,7 @@ def usage(argv):
 def main(argv):
     if (len(argv)) == 1:
         usage(argv)
-
+    max_args = 0
     total_files = 0
     path_index = 1
     global include_directories
@@ -359,11 +370,30 @@ def main(argv):
             files_skipped += 1
             continue
         files_processed_set.add(file[:file.rfind(".")])
-        double_nested_list.append(analyzeFile(file))
+        these_results, this_max_arg = analyzeFile(file)
+        double_nested_list.append(these_results)
+        max_args = max(max_args, this_max_arg)
 
-    all_results = {}
-
-
+    all_results = set()
+    header = "function_name,arg_count,return_type, is_variadic"
+    for i in range(max_args+1):
+        header += f",Arg #{i} Array Count"
+        header += f",Arg #{i} Modifiers"
+        header += f",Arg #{i} Pointer Count"
+        header += f",Arg #{i} Type"
+    header += '\n'
+    col_count = header.count(',')-1    
+    for l1 in double_nested_list:
+        for l2 in l1:
+            #row = str(index)
+            row = l2.pop('function_name')
+            row += ","+l2.pop('arg_count')
+            row += ","+l2.pop('return_type')
+            row += ","+l2.pop('is_variadic')
+            for k in sorted(l2.keys()):
+                row += ',' + str(l2[k])
+            row += ',' * (col_count - row.count(','))
+            all_results.add(row+"\n")
 
     #all_results = {k:v for x in dict_list for k,v in x.items()}
     """
@@ -376,8 +406,8 @@ def main(argv):
     time = datetime.now().strftime('%Y-%m-%d%H:%M:%S')
     file_name = "arg_parser_aggregated_types_" + time +".csv"
     with open(file_name, "w") as f:
-        f.write(f"Files Succeeded: {files_succeeded}")
-        f.write(f"Total Files: {files_processed_int}")
+        #f.write(f"Files Succeeded: {files_succeeded}")
+        #f.write(f"Total Files: {files_processed_int}")
         if total_files:
             f.write(f"Percent Success: {round(100*float(files_succeeded / total_files))}%")        
         for k, v in results.items():
@@ -393,32 +423,11 @@ def main(argv):
     #pp.pprint(results)
     pp.pprint(all_results)
     with open(file_name, "w") as w:
-        header = "function_index,function_name,arg_count,return_type, is_variadic"
-        for i in range(max_args+1):
-            header += f",Arg #{i} Array Count"
-            header += f",Arg #{i} Modifiers"
-            header += f",Arg #{i} Pointer Count"
-            header += f",Arg #{i} Type"
-        header += '\n'
-        col_count = header.count(',')-1
         w.write(header)
-        index = 0
-        for l1 in double_nested_list:
-            for l2 in l1:
-                row = str(index)
-                row += ","+l2.pop('function_name')
-                row += ","+l2.pop('arg_count')
-                row += ","+l2.pop('return_type')
-                row += ","+l2.pop('is_variadic')
-                for k in sorted(l2.keys()):
-                    row += ',' + str(l2[k])
-                row += ',' * (col_count - row.count(','))
-                w.write(row+"\n")
-                index +=1 
+        for entry in all_results:
+            w.write(entry)
 
-    #final_df = pd.DataFrame.from_dict(all_results)
-    #final_df.to_csv(file_name)
-    print(f"Max arg count: {max_args} +1 since starting at 0")
+    print(f"Max arg count: {max_args+1}")
 
 if __name__ == "__main__":
     main(sys.argv)
