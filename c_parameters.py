@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
 
+'''
+Reverse Engineering Helper -
+This script is used to create a database of C function signatures as follows:
+
+function_name,arg_count,return_type, is_variadic,
+Arg #0 Array Count,Arg #0 Modifiers,Arg #0 Pointer Count,Arg #0 Type,...
+- For all N arguments
+Notes:
+Arg #N Array Count: Indicates if this arg is an N-dimensional array
+Arg #N Pointer Count: Similar to the above 
+    - indicates how many levels of pointer redirection for this arg
+
+Simply provide any number of C files as arguments
+(includes preprocessed files - this is best) and a .csv will be produced that
+can be analyzed in your favorite spreadsheet program (hint: use a pivot table)
+
+Suggested use/motivation: use with Ghidra when Ghidra can't identify a function
+'''
+
 import copy
 import os
 import pprint
@@ -13,7 +32,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import logging
-logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.ERROR)
 logger = logging.getLogger()
 
 rows, columns = os.popen('stty size', 'r').read().split()
@@ -84,6 +103,53 @@ c_scopes = [
 
 include_directories = []
 
+def show_nearest_neighbors(list1,  all_lists, display_limit):
+    print(f"Comparing to function:\n{list1}")
+    scores = defaultdict(list)
+    for list2 in all_lists:
+        if list1 != list2:
+            score = edit_distance(list1.split(',')[1:], list2.split(',')[1:])
+            scores[score].append(list2)
+
+    display_count = 0
+    for score in sorted(scores.keys()):
+        if display_count >= display_limit:
+            break
+        print(f"Edit Distance: {score}".center(80,"="))
+        for list2 in scores[score]:
+            display_count += 1
+            print(list2.strip())
+
+                            
+
+def edit_distance(list1, list2):
+    # To compute the Levenshtein distance between two entries, 
+    # say entries 92 and 94, 
+    # try this in interactive mode after running this script:
+    # edit_distance(results_list[92].split(',')[1:], results_list[94].split(',')[1:])
+
+    """Ref: https://bit.ly/2Pf4a6Z"""
+    #print(f"Comparing:\n{list1}{list2}")
+
+    if len(list1) > len(list2):
+        difference = len(list1) - len(list2)
+        list1[:difference]
+
+    elif len(list2) > len(list1):
+        difference = len(list2) - len(list1)
+        list2[:difference]
+
+    else:
+        difference = 0
+
+    for i in range(len(list1)):
+        try:
+            if list1[i] != list2[i]:
+                difference += 1
+        except IndexError:
+            break
+
+    return difference
 
 def analyzeFile(filename: str):
     
@@ -283,7 +349,7 @@ def analyzeFile(filename: str):
                 results[dict_entry] += 1
             this_row['arg_count'] =  str(arg_index+1)
             logger.info("Done with row")
-            pprint.pprint(this_row)
+            #pprint.pprint(this_row)
             these_results.append(this_row)
         #files_succeeded += 1
     return these_results, max_args
@@ -393,6 +459,7 @@ def main(argv):
             for k in sorted(l2.keys()):
                 row += ',' + str(l2[k])
             row += ',' * (col_count - row.count(','))
+            row = row.replace("\n","")
             all_results.add(row+"\n")
 
     #all_results = {k:v for x in dict_list for k,v in x.items()}
@@ -421,13 +488,17 @@ def main(argv):
 
     file_name = "arg_parser_results_" + time +".csv"
     #pp.pprint(results)
-    pp.pprint(all_results)
+    #pp.pprint(all_results)
+    all_results = sorted(all_results)
     with open(file_name, "w") as w:
         w.write(header)
-        for entry in all_results:
+        for entry_index, entry in enumerate(all_results):
+            print(f"{entry_index} {entry.strip()}")
             w.write(entry)
 
     print(f"Max arg count: {max_args+1}")
+    return list(all_results)
 
 if __name__ == "__main__":
-    main(sys.argv)
+    results_list = main(sys.argv)
+    
